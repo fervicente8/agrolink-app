@@ -62,8 +62,8 @@ export default function LoginScreen() {
     setError(null);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     try {
-      await login(email.trim(), password.trim());
-      // Guardar o limpiar credenciales recordadas
+      await login(email.trim(), password.trim(), rememberMe);
+      // Guardar o limpiar credenciales recordadas (para pre-llenar formulario)
       try {
         if (SecureStore?.setItemAsync && SecureStore?.deleteItemAsync) {
           if (rememberMe) {

@@ -15,7 +15,11 @@ type User = {
 type AuthContextType = {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (
+    email: string,
+    password: string,
+    rememberMe?: boolean
+  ) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -28,6 +32,7 @@ try {
 } catch {}
 
 const KEY = "auth:user";
+const REMEMBER_KEY = "auth:rememberMe";
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -45,35 +50,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })();
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
-    // Usuario de prueba hardcodeado
-    const TEST_EMAIL = "doscaciques@gmail.com";
-    const TEST_PASSWORD = "12345678";
-    const TEST_NAME = "Dos Caciques";
+  const login = useCallback(
+    async (email: string, password: string, rememberMe: boolean = false) => {
+      // Usuario de prueba hardcodeado
+      const TEST_EMAIL = "doscaciques@gmail.com";
+      const TEST_PASSWORD = "12345678";
+      const TEST_NAME = "Dos Caciques";
 
-    const normalizedEmail = (email || "").trim().toLowerCase();
-    const pass = (password || "").trim();
+      const normalizedEmail = (email || "").trim().toLowerCase();
+      const pass = (password || "").trim();
 
-    if (normalizedEmail === TEST_EMAIL && pass === TEST_PASSWORD) {
-      const u: User = { name: TEST_NAME, email: TEST_EMAIL };
-      setUser(u);
-      try {
-        if (SecureStore?.setItemAsync) {
-          await SecureStore.setItemAsync(KEY, JSON.stringify(u));
-        }
-      } catch {}
-      return;
-    }
+      if (normalizedEmail === TEST_EMAIL && pass === TEST_PASSWORD) {
+        const u: User = { name: TEST_NAME, email: TEST_EMAIL };
+        setUser(u);
+        try {
+          if (SecureStore?.setItemAsync) {
+            await SecureStore.setItemAsync(KEY, JSON.stringify(u));
+            // Guardar flag de rememberMe para mantener la sesión
+            await SecureStore.setItemAsync(
+              REMEMBER_KEY,
+              JSON.stringify(rememberMe)
+            );
+          }
+        } catch {}
+        return;
+      }
 
-    // Credenciales inválidas
-    throw new Error("Credenciales inválidas");
-  }, []);
+      // Credenciales inválidas
+      throw new Error("Credenciales inválidas");
+    },
+    []
+  );
 
   const logout = useCallback(async () => {
     setUser(null);
     try {
-      if (SecureStore?.deleteItemAsync) {
-        await SecureStore.deleteItemAsync(KEY);
+      if (SecureStore?.deleteItemAsync && SecureStore?.getItemAsync) {
+        // Solo borrar credenciales si no está marcado "Recordarme"
+        const rememberRaw = await SecureStore.getItemAsync(REMEMBER_KEY);
+        const remember = rememberRaw ? JSON.parse(rememberRaw) : false;
+        if (!remember) {
+          await SecureStore.deleteItemAsync(KEY);
+        }
+        // Siempre borrar el flag de rememberMe al hacer logout explícito
+        await SecureStore.deleteItemAsync(REMEMBER_KEY);
       }
     } catch {}
   }, []);
