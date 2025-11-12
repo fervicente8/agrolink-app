@@ -1,11 +1,13 @@
 import { LinearGradient } from "expo-linear-gradient";
-import { StyleSheet, View, Pressable } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { useColorScheme } from "react-native";
 import { useRouter } from "expo-router";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import { SmartTouchable as Touchable } from "@/components/ui/touchable";
+import * as Haptics from "expo-haptics";
 
 export default function NotFoundScreen() {
   const scheme = useColorScheme() || "light";
@@ -36,22 +38,26 @@ export default function NotFoundScreen() {
           Puedes volver al Inicio o ir directo a Escanear.
         </ThemedText>
         <View style={styles.actions}>
-          <Pressable
+          <Touchable
             style={[styles.button, { backgroundColor: c.primary }]}
-            onPress={() => router.replace("/(tabs)")}
+            onPress={() => {
+              router.replace("/(tabs)");
+            }}
           >
             <ThemedText style={styles.buttonText}>Ir a Inicio</ThemedText>
-          </Pressable>
-          <Pressable
+          </Touchable>
+          <Touchable
             style={[styles.buttonOutline, { borderColor: c.primary }]}
-            onPress={() => router.replace("/(tabs)/scan")}
+            onPress={() => {
+              router.replace("/(tabs)/scan");
+            }}
           >
             <ThemedText
               style={[styles.buttonTextOutline, { color: c.primary }]}
             >
               Ir a Escanear
             </ThemedText>
-          </Pressable>
+          </Touchable>
         </View>
       </View>
     </ThemedView>

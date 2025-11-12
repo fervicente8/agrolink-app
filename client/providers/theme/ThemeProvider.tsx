@@ -25,7 +25,7 @@ export const AppThemeProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   const systemScheme = useSystemColorScheme() ?? "light";
-  const [preference, setPreferenceState] = useState<AppTheme>("system");
+  const [preference, setPreferenceState] = useState<AppTheme>("light");
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {

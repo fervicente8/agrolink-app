@@ -1,12 +1,5 @@
 import React, { useMemo, useState } from "react";
-import {
-  StyleSheet,
-  View,
-  TextInput,
-  Pressable,
-  Image,
-  FlatList,
-} from "react-native";
+import { StyleSheet, View, TextInput, Image, FlatList } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
@@ -15,6 +8,8 @@ import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { Link } from "expo-router";
+import { SmartTouchable as Touchable } from "@/components/ui/touchable";
+import * as Haptics from "expo-haptics";
 
 type ManualResult = {
   id: string;
@@ -121,17 +116,18 @@ export default function ManualEntryScreen() {
             returnKeyType='search'
           />
           {value.length > 0 && (
-            <Pressable
-              onPress={() => setValue("")}
+            <Touchable
+              onPress={() => {
+                setValue("");
+              }}
               hitSlop={8}
-              style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
             >
               <MaterialIcons
                 name='close'
                 size={20}
                 color={Colors[scheme].icon as string}
               />
-            </Pressable>
+            </Touchable>
           )}
         </ThemedView>
         {/* Resultados */}
@@ -183,7 +179,13 @@ function ResultsList({
           }}
           asChild
         >
-          <Pressable style={({ pressed }) => [{ opacity: pressed ? 0.9 : 1 }]}>
+          <Touchable
+            onPress={() =>
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(
+                () => {}
+              )
+            }
+          >
             <View
               style={[
                 styles.resultCard,
@@ -205,7 +207,7 @@ function ResultsList({
                 </ThemedText>
               </View>
             </View>
-          </Pressable>
+          </Touchable>
         </Link>
       )}
     />

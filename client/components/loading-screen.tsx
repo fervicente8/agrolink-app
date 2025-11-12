@@ -1,7 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { StyleSheet, View, Image, Animated, Easing } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { ThemedText } from "@/components/themed-text";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 
@@ -10,7 +9,7 @@ type Props = {
   durationMs?: number;
 };
 
-export function LoadingScreen({ onDone, durationMs = 3000 }: Props) {
+export function LoadingScreen({ onDone, durationMs = 1000 }: Props) {
   const scheme = useColorScheme() ?? "light";
 
   useEffect(() => {

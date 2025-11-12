@@ -1,11 +1,5 @@
 import React, { useMemo, useState } from "react";
-import {
-  StyleSheet,
-  FlatList,
-  View,
-  Pressable,
-  ScrollView,
-} from "react-native";
+import { StyleSheet, FlatList, View, ScrollView } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import { ThemedText } from "@/components/themed-text";
@@ -15,6 +9,8 @@ import { useColorScheme } from "@/hooks/use-color-scheme";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SmartTouchable as Touchable } from "@/components/ui/touchable";
+import * as Haptics from "expo-haptics";
 
 type Trace = {
   id: string;
@@ -232,8 +228,10 @@ function FilterPill({
 }) {
   const scheme = useColorScheme() ?? "light";
   return (
-    <Pressable
-      onPress={onPress}
+    <Touchable
+      onPress={() => {
+        onPress();
+      }}
       style={[
         styles.pill,
         active
@@ -254,7 +252,7 @@ function FilterPill({
       >
         {label}
       </ThemedText>
-    </Pressable>
+    </Touchable>
   );
 }
 
