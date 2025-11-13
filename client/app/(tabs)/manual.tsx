@@ -1,5 +1,13 @@
-import React, { useMemo, useState } from "react";
-import { StyleSheet, View, TextInput, Image, FlatList } from "react-native";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
+import {
+  StyleSheet,
+  View,
+  TextInput,
+  Image,
+  FlatList,
+  ActivityIndicator,
+  Platform,
+} from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
@@ -7,68 +15,68 @@ import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import { Link } from "expo-router";
+import { useRouter } from "expo-router";
 import { SmartTouchable as Touchable } from "@/components/ui/touchable";
 import * as Haptics from "expo-haptics";
+import { useClient } from "@/providers/client/ClientProvider";
 
-type ManualResult = {
-  id: string;
-  title: string;
-  subtitle: string;
-  code: string;
-  lot?: string;
-  presentation?: string;
-  verified?: boolean;
+type ProductoSenasa = {
+  _id: number;
+  numeroInscripcion?: string;
+  marca?: string;
+  firma?: string;
+  claseToxicologica?: string;
+  sustanciasActivas?: string;
 };
-
-const RESPONSES: ManualResult[] = [
-  {
-    id: "1",
-    title: "ADAMA Linuron 50 FW",
-    subtitle: "Herbicida - Grupo C2 - ADAMA Essentials",
-    code: "LIN-50FW-ADAMA",
-    lot: "2508108-0",
-    presentation: "4 bidones × 5L",
-    verified: true,
-  },
-  {
-    id: "2",
-    title: "Urea 50kg",
-    subtitle: "Fertilizante nitrogenado",
-    code: "UREA-50KG",
-    lot: "#U-2210",
-    presentation: "Bolsa 50 kg",
-    verified: true,
-  },
-  {
-    id: "3",
-    title: "NPK 20-20-20",
-    subtitle: "Fertilizante balanceado",
-    code: "NPK-20-20-20",
-    lot: "#NPK-8891",
-    presentation: "Saco 25 kg",
-    verified: false,
-  },
-  {
-    id: "4",
-    title: "Lote #A1",
-    subtitle: "Conservas de tomate",
-    code: "A1-2025",
-    lot: "#A1",
-    presentation: "Cajas 12u",
-    verified: true,
-  },
-];
 
 export default function ManualEntryScreen() {
   const insets = useSafeAreaInsets();
   const scheme = useColorScheme() ?? "light";
+  const router = useRouter();
+  const { selectedClient } = useClient();
   const [value, setValue] = useState("");
+  const [productos, setProductos] = useState<ProductoSenasa[]>([]);
+  const [loading, setLoading] = useState(false);
 
   const placeholderColor = useMemo(
     () => (scheme === "light" ? "#7C887F" : "#95A0A9"),
     [scheme]
   );
+
+  const getApiBaseUrl = () => {
+    const envUrl = process.env.EXPO_PUBLIC_API_URL as string | undefined;
+    if (envUrl) return envUrl;
+    if (Platform.OS === "android") return "http://10.0.2.2:3001";
+    return "http://localhost:3001";
+  };
+
+  const searchProductos = useCallback(async (query: string) => {
+    if (!query || query.trim().length < 2) {
+      setProductos([]);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const response = await fetch(
+        `${getApiBaseUrl()}/api/productos/search?q=${encodeURIComponent(query)}`
+      );
+      const data = await response.json();
+      setProductos(data.productos || []);
+    } catch (error) {
+      setProductos([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      searchProductos(value);
+    }, 500); // Debounce 500ms
+
+    return () => clearTimeout(timer);
+  }, [value, searchProductos]);
 
   return (
     <ThemedView style={{ flex: 1 }}>
@@ -131,8 +139,16 @@ export default function ManualEntryScreen() {
           )}
         </ThemedView>
         {/* Resultados */}
-        <ThemedText type='defaultSemiBold'>Resultados</ThemedText>
-        <ResultsList scheme={scheme} query={value} />
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <ThemedText type='defaultSemiBold'>Resultados</ThemedText>
+        </View>
+        <ResultsList
+          scheme={scheme}
+          productos={productos}
+          loading={loading}
+          router={router}
+          selectedClient={selectedClient}
+        />
       </View>
     </ThemedView>
   );
@@ -140,75 +156,89 @@ export default function ManualEntryScreen() {
 
 function ResultsList({
   scheme,
-  query,
+  productos,
+  loading,
+  router,
+  selectedClient,
 }: {
   scheme: "light" | "dark";
-  query: string;
+  productos: ProductoSenasa[];
+  loading: boolean;
+  router: any;
+  selectedClient: any;
 }) {
-  const logo = require("../../assets/images/logo.png");
-  const data = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return RESPONSES;
-    return RESPONSES.filter(
-      (r) =>
-        r.title.toLowerCase().includes(q) ||
-        r.subtitle.toLowerCase().includes(q) ||
-        r.code.toLowerCase().includes(q) ||
-        (r.lot?.toLowerCase().includes(q) ?? false)
-    );
-  }, [query]);
-
-  if (!data.length) {
+  if (loading && productos.length === 0) {
     return (
       <View style={{ paddingVertical: 24, alignItems: "center" }}>
-        <ThemedText style={{ opacity: 0.7 }}>Sin resultados</ThemedText>
+        <ActivityIndicator
+          size='large'
+          color={Colors[scheme].primary as string}
+        />
+      </View>
+    );
+  }
+
+  if (!productos.length) {
+    return (
+      <View style={{ paddingVertical: 24, alignItems: "center" }}>
+        <ThemedText style={{ opacity: 0.7 }}>
+          Ingresá un término de búsqueda
+        </ThemedText>
       </View>
     );
   }
 
   return (
     <FlatList
-      data={data}
-      keyExtractor={(item) => item.id}
+      data={productos}
+      keyExtractor={(item) => item._id.toString()}
       contentContainerStyle={{ gap: 12 }}
       renderItem={({ item }) => (
-        <Link
-          href={{
-            pathname: "/confirm",
-            params: { code: item.code, source: "manual" },
+        <Touchable
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
+              () => {}
+            );
+            router.push({
+              pathname: "/confirm",
+              params: {
+                productData: JSON.stringify(item),
+                type: "manual",
+                client: selectedClient?.number ?? "",
+                source: "manual",
+              },
+            });
           }}
-          asChild
         >
-          <Touchable
-            onPress={() =>
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(
-                () => {}
-              )
-            }
+          <View
+            style={[
+              styles.resultCard,
+              {
+                backgroundColor: Colors[scheme].card,
+                borderColor: Colors[scheme].border,
+              },
+            ]}
           >
-            <View
-              style={[
-                styles.resultCard,
-                {
-                  backgroundColor: Colors[scheme].card,
-                  borderColor: Colors[scheme].border,
-                },
-              ]}
-            >
-              <Image source={logo} style={styles.thumb} resizeMode='cover' />
-              <View style={{ flex: 1 }}>
-                <ThemedText numberOfLines={1} style={styles.resultTitle}>
-                  {item.title}
+            <View style={{ flex: 1 }}>
+              <ThemedText numberOfLines={1} style={styles.resultTitle}>
+                {item.marca || "(Sin marca)"}
+              </ThemedText>
+              <ThemedText numberOfLines={2} style={styles.metaLine}>
+                {item.numeroInscripcion &&
+                  `Inscripción: ${item.numeroInscripcion}`}
+                {item.firma && ` • ${item.firma}`}
+              </ThemedText>
+              {item.claseToxicologica && (
+                <ThemedText
+                  numberOfLines={1}
+                  style={[styles.metaLine, { marginTop: 2 }]}
+                >
+                  Clase: {item.claseToxicologica}
                 </ThemedText>
-                <ThemedText numberOfLines={2} style={styles.metaLine}>
-                  {`Código: ${item.code}`}
-                  {item.lot ? `  • Lote ${item.lot}` : ""}
-                  {item.presentation ? `  • ${item.presentation}` : ""}
-                </ThemedText>
-              </View>
+              )}
             </View>
-          </Touchable>
-        </Link>
+          </View>
+        </Touchable>
       )}
     />
   );
@@ -257,12 +287,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
     borderRadius: 12,
     borderWidth: 1,
   },
-  thumb: { width: 80, height: 80, borderRadius: 12, overflow: "hidden" },
   resultTitle: { fontSize: 14, fontWeight: "700" },
   metaLine: { fontSize: 11, opacity: 0.7 },
 });

@@ -49,19 +49,34 @@ function extractBase64(body: OcrBody): string | null {
   return null;
 }
 
-// Heurística: busca posibles números de inscripción (secuencias de 4-6 dígitos) y líneas con palabras clave
+// Heurística mejorada: extrae números de inscripción (con/sin puntos), marcas y firmas
 function parseCandidates(text: string) {
   const lines = text
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean);
   const joined = lines.join(" ");
-  const numeroRegex = /\b\d{4,6}\b/g; // ajustar según formato real
-  const numeros = Array.from(new Set(joined.match(numeroRegex) || []));
+
+  // Buscar números de inscripción: captura variantes con puntos/espacios (ej: "36.374", "36374")
+  const numeroRegex = /\b\d{1,3}[.\s]?\d{3,4}\b|\b\d{4,6}\b/g;
+  const numerosRaw = joined.match(numeroRegex) || [];
+  // Normalizar: quitar puntos y espacios
+  const numeros = Array.from(
+    new Set(numerosRaw.map((n) => n.replace(/[.\s]/g, "")))
+  ).filter((n) => n.length >= 4 && n.length <= 6);
+
+  // Extraer marcas candidatas: palabras en mayúsculas de 3+ letras
+  const marcaRegex = /\b[A-ZÑÁÉÍÓÚ]{3,}\b/g;
+  const marcasCandidatas = Array.from(new Set(joined.match(marcaRegex) || []));
+
+  // Líneas con palabras clave relevantes
   const palabrasClave = lines.filter((l) =>
-    /marca|inscrip|registro|firma|producto/i.test(l)
+    /inscri|registro|senasa|marca|firma|fungicida|herbicida|insecticida/i.test(
+      l
+    )
   );
-  return { numeros, palabrasClave, rawLines: lines };
+
+  return { numeros, marcasCandidatas, palabrasClave, rawLines: lines };
 }
 
 ocrRouter.post("/api/ocr", async (req: Request, res: Response) => {
@@ -94,22 +109,9 @@ ocrRouter.post("/api/ocr", async (req: Request, res: Response) => {
       const [result] = await client.textDetection(visionInput);
       durationMs = Date.now() - tStart;
       annotation = result.fullTextAnnotation?.text || "";
-      logger.info(
-        {
-          durationMs,
-          hasText: annotation.length > 0,
-          via: "client",
-          clientMode: visionClientMode,
-        },
-        "OCR procesado"
-      );
     } catch (e: any) {
       // Fallback: si hay API key configurada, usar REST de Vision
       if (VISION_API_KEY) {
-        logger.warn(
-          { err: e?.message },
-          "Fallo ADC; usando Vision REST con API key"
-        );
         const reqBody = {
           requests: [
             {
@@ -131,10 +133,6 @@ ocrRouter.post("/api/ocr", async (req: Request, res: Response) => {
           data?.responses?.[0]?.fullTextAnnotation?.text ||
           data?.responses?.[0]?.textAnnotations?.[0]?.description ||
           "";
-        logger.info(
-          { durationMs, hasText: annotation.length > 0, via: "rest" },
-          "OCR procesado"
-        );
       } else {
         throw e;
       }
@@ -144,44 +142,68 @@ ocrRouter.post("/api/ocr", async (req: Request, res: Response) => {
       return res.json({ text: "", matches: [], durationMs });
     }
 
-    const { numeros, palabrasClave, rawLines } = parseCandidates(annotation);
+    const { numeros, marcasCandidatas, palabrasClave, rawLines } =
+      parseCandidates(annotation);
 
-    // Construir criterios dinámicos
-    const orCriteria: any[] = [];
-    for (const n of numeros) {
-      orCriteria.push({ numeroInscripcion: n });
-    }
-
-    const addRegex = (field: string, value: string) => {
-      if (value.length < 3) return; // evitar ruido
-      orCriteria.push({
-        [field]: {
-          $regex: value.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&"),
-          $options: "i",
-        },
-      });
-    };
-
-    for (const line of palabrasClave) {
-      const tokens = line.split(/\s+/).filter((t) => t.length >= 3);
-      if (tokens[0]) addRegex("marca", tokens[0]);
-      if (tokens[1]) addRegex("marca", tokens[1]);
-      if (tokens[0]) addRegex("firma", tokens[0]);
-    }
-
-    const query = orCriteria.length > 0 ? { $or: orCriteria } : {};
+    // Estrategia de búsqueda por prioridad: primero marca exacta, luego número, luego firma
     let matches: any[] = [];
-    if (orCriteria.length > 0) {
-      matches = await ProductoSenasa.find(query).limit(maxResults).lean();
+
+    // PRIORIDAD 1: Buscar por marca exacta (case-insensitive)
+    if (marcasCandidatas.length > 0) {
+      const marcaQueries = marcasCandidatas
+        .filter((m) => m.length >= 3)
+        .map((m) => ({ marca: { $regex: `^${m}$`, $options: "i" } }));
+
+      if (marcaQueries.length > 0) {
+        const marcaMatches = await ProductoSenasa.find({
+          $or: marcaQueries,
+        })
+          .limit(maxResults)
+          .lean();
+        matches.push(...marcaMatches);
+      }
     }
+
+    // PRIORIDAD 2: Buscar por número de inscripción (solo si no tenemos suficientes)
+    if (matches.length < maxResults && numeros.length > 0) {
+      const numeroQueries = numeros.map((n) => ({ numeroInscripcion: n }));
+      const numeroMatches = await ProductoSenasa.find({
+        $or: numeroQueries,
+      })
+        .limit(maxResults - matches.length)
+        .lean();
+      matches.push(...numeroMatches);
+    }
+
+    // PRIORIDAD 3: Buscar por firma (solo si aún faltan resultados)
+    if (matches.length < maxResults) {
+      const firmaTokens = marcasCandidatas.filter((t) => t.length >= 5);
+      if (firmaTokens.length > 0) {
+        const firmaQueries = firmaTokens.map((t) => ({
+          firma: { $regex: t, $options: "i" },
+        }));
+        const firmaMatches = await ProductoSenasa.find({
+          $or: firmaQueries,
+        })
+          .limit(maxResults - matches.length)
+          .lean();
+        matches.push(...firmaMatches);
+      }
+    }
+
+    // Eliminar duplicados por _id
+    const uniqueMatches = Array.from(
+      new Map(matches.map((m) => [m._id.toString(), m])).values()
+    ).slice(0, maxResults);
 
     res.json({
       text: annotation,
       durationMs,
       numerosDetectados: numeros,
+      marcasDetectadas: marcasCandidatas,
       lineasClave: palabrasClave,
-      matches,
-      totalMatches: matches.length,
+      matches: uniqueMatches,
+      totalMatches: uniqueMatches.length,
       rawLines,
     });
   } catch (err: any) {

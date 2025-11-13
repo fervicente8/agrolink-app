@@ -10,6 +10,13 @@ export type TraceItem = {
   unit: string; // unidad (bidones)
   totalLiters: number; // litros totales
   timestamp: Date; // fecha/hora registro
+  // Campos adicionales SENASA
+  firma?: string; // Fabricante/Firma
+  claseToxicologica?: string; // Clase toxicológica
+  sustanciasActivas?: string; // Sustancias activas
+  fechaProduccion?: string; // Fecha producción
+  vencimiento?: string; // Fecha vencimiento
+  presentacion?: string; // Presentación del producto
 };
 
 type OrderContextType = {
@@ -46,6 +53,12 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
       qty: t.qty,
       unit: t.unit,
       totalLiters: t.totalLiters,
+      firma: t.firma,
+      claseToxicologica: t.claseToxicologica,
+      sustanciasActivas: t.sustanciasActivas,
+      fechaProduccion: t.fechaProduccion,
+      vencimiento: t.vencimiento,
+      presentacion: t.presentacion,
     };
     setItems((prev) => [item, ...prev]);
     return item;
@@ -68,7 +81,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
 
   const toCSV = () => {
     const header =
-      "ID_Traza,Cliente,Producto,Codigo_Producto,Lote,Cantidad,Unidad,Total_Litros,Fecha_Hora";
+      "ID_Traza,Cliente,Producto,Codigo_Producto,Lote,Cantidad,Unidad,Total_Litros,Fecha_Hora,Firma,Clase_Toxicologica,Sustancias_Activas,Fecha_Produccion,Vencimiento,Presentacion";
     const rows = items
       .slice() // mantener orden agregado
       .reverse()
@@ -80,7 +93,8 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
         )}/${ts.getFullYear()}, ${pad(ts.getHours())}:${pad(
           ts.getMinutes()
         )}:${pad(ts.getSeconds())}`;
-        const q = (s: string | number) => `"${String(s).replace(/"/g, '""')}"`;
+        const q = (s: string | number | undefined) =>
+          `"${String(s || "").replace(/"/g, '""')}"`;
         return [
           q(it.id),
           q(it.client),
@@ -91,6 +105,12 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
           q(it.unit),
           q(it.totalLiters),
           q(date),
+          q(it.firma),
+          q(it.claseToxicologica),
+          q(it.sustanciasActivas),
+          q(it.fechaProduccion),
+          q(it.vencimiento),
+          q(it.presentacion),
         ].join(",");
       });
     return [header, ...rows].join("\n");

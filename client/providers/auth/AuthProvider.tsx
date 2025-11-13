@@ -1,113 +1,167 @@
 import React, {
   createContext,
-  useCallback,
   useContext,
-  useEffect,
-  useMemo,
   useState,
+  useEffect,
+  ReactNode,
 } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
 
-type User = {
-  name: string;
+interface User {
+  id: string;
   email: string;
-};
+  nombre: string;
+  apellido?: string;
+  role: "admin" | "operario" | "supervisor";
+  empresa: {
+    id: string;
+    nombre: string;
+    plan: string;
+  };
+}
 
 type AuthContextType = {
   user: User | null;
+  token: string | null;
   loading: boolean;
-  login: (
-    email: string,
-    password: string,
-    rememberMe?: boolean
-  ) => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
+  register: (data: RegisterData) => Promise<void>;
   logout: () => Promise<void>;
+  isAdmin: boolean;
 };
+
+interface RegisterData {
+  email: string;
+  password: string;
+  nombre: string;
+  apellido?: string;
+  empresaNombre: string;
+  cuit?: string;
+  razonSocial?: string;
+}
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Dynamic import to avoid breaking if module is not installed yet
-let SecureStore: any = null;
-try {
-  SecureStore = require("expo-secure-store");
-} catch {}
+const getApiBaseUrl = () => {
+  const envUrl = process.env.EXPO_PUBLIC_API_URL as string | undefined;
+  if (envUrl) return envUrl;
+  if (Platform.OS === "android") return "http://10.0.2.2:3001";
+  return "http://localhost:3001";
+};
 
-const KEY = "auth:user";
-const REMEMBER_KEY = "auth:rememberMe";
+const API_URL = getApiBaseUrl();
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Cargar token y usuario al iniciar
   useEffect(() => {
-    (async () => {
-      try {
-        if (SecureStore?.getItemAsync) {
-          const raw = await SecureStore.getItemAsync(KEY);
-          if (raw) setUser(JSON.parse(raw));
-        }
-      } catch {}
-      setLoading(false);
-    })();
+    loadStoredAuth();
   }, []);
 
-  const login = useCallback(
-    async (email: string, password: string, rememberMe: boolean = false) => {
-      // Usuario de prueba hardcodeado
-      const TEST_EMAIL = "doscaciques@gmail.com";
-      const TEST_PASSWORD = "12345678";
-      const TEST_NAME = "Dos Caciques";
-
-      const normalizedEmail = (email || "").trim().toLowerCase();
-      const pass = (password || "").trim();
-
-      if (normalizedEmail === TEST_EMAIL && pass === TEST_PASSWORD) {
-        const u: User = { name: TEST_NAME, email: TEST_EMAIL };
-        setUser(u);
-        try {
-          if (SecureStore?.setItemAsync) {
-            await SecureStore.setItemAsync(KEY, JSON.stringify(u));
-            // Guardar flag de rememberMe para mantener la sesión
-            await SecureStore.setItemAsync(
-              REMEMBER_KEY,
-              JSON.stringify(rememberMe)
-            );
-          }
-        } catch {}
-        return;
-      }
-
-      // Credenciales inválidas
-      throw new Error("Credenciales inválidas");
-    },
-    []
-  );
-
-  const logout = useCallback(async () => {
-    setUser(null);
+  const loadStoredAuth = async () => {
     try {
-      if (SecureStore?.deleteItemAsync && SecureStore?.getItemAsync) {
-        // Solo borrar credenciales si no está marcado "Recordarme"
-        const rememberRaw = await SecureStore.getItemAsync(REMEMBER_KEY);
-        const remember = rememberRaw ? JSON.parse(rememberRaw) : false;
-        if (!remember) {
-          await SecureStore.deleteItemAsync(KEY);
-        }
-        // Siempre borrar el flag de rememberMe al hacer logout explícito
-        await SecureStore.deleteItemAsync(REMEMBER_KEY);
+      const storedToken = await AsyncStorage.getItem("auth:token");
+      const storedUser = await AsyncStorage.getItem("auth:user");
+
+      if (storedToken && storedUser) {
+        setToken(storedToken);
+        setUser(JSON.parse(storedUser));
       }
-    } catch {}
-  }, []);
+    } catch (error) {
+      console.error("[Auth] Error cargando sesión:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const value = useMemo(
-    () => ({ user, loading, login, logout }),
-    [user, loading, login, logout]
+  const login = async (email: string, password: string) => {
+    try {
+      const response = await fetch(`${API_URL}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Error en el login");
+      }
+
+      await AsyncStorage.setItem("auth:token", data.token);
+      await AsyncStorage.setItem("auth:user", JSON.stringify(data.user));
+
+      setToken(data.token);
+      setUser(data.user);
+    } catch (error: any) {
+      console.error("[Auth] Error en login:", error.message);
+      throw error;
+    }
+  };
+
+  const register = async (data: RegisterData) => {
+    try {
+      const response = await fetch(`${API_URL}/api/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Error en el registro");
+      }
+
+      await AsyncStorage.setItem("auth:token", result.token);
+      await AsyncStorage.setItem("auth:user", JSON.stringify(result.user));
+
+      setToken(result.token);
+      setUser(result.user);
+    } catch (error: any) {
+      console.error("[Auth] Error en registro:", error.message);
+      throw error;
+    }
+  };
+
+  const logout = async () => {
+    try {
+      await AsyncStorage.removeItem("auth:token");
+      await AsyncStorage.removeItem("auth:user");
+      setToken(null);
+      setUser(null);
+    } catch (error) {
+      console.error("[Auth] Error en logout:", error);
+    }
+  };
+
+  const isAdmin = user?.role === "admin";
+
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+        token,
+        loading,
+        login,
+        register,
+        logout,
+        isAdmin,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
   );
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
-  return ctx;
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error("useAuth debe usarse dentro de AuthProvider");
+  }
+  return context;
 }

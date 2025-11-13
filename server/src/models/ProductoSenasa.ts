@@ -8,6 +8,7 @@ const ProductoSenasaSchema = new mongoose.Schema(
     firma: { type: String },
     claseToxicologica: { type: String },
     sustanciasActivas: { type: String },
+    envases: { type: mongoose.Schema.Types.Mixed }, // Array de envases
     detalle: { type: mongoose.Schema.Types.Mixed },
   },
   { timestamps: true, collection: "productos_senasa" }

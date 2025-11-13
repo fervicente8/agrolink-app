@@ -14,14 +14,12 @@ const EnvSchema = z.object({
         .string()
         .transform((s) => s.trim().replace(/^['\"]|['\"]$/g, ""))
         .pipe(z
-        .string()
-        .min(1, "MONGODB_URI es requerido")
-        .refine((v) => v.startsWith("mongodb://") || v.startsWith("mongodb+srv://"), "MONGODB_URI debe comenzar con mongodb:// o mongodb+srv://")),
+            .string()
+            .min(1, "MONGODB_URI es requerido")
+            .refine((v) => v.startsWith("mongodb://") || v.startsWith("mongodb+srv://"), "MONGODB_URI debe comenzar con mongodb:// o mongodb+srv://")),
 });
 const parsed = EnvSchema.safeParse(process.env);
 if (!parsed.success) {
-    console.error("Error de configuración .env:", parsed.error.format());
-    // No lanzamos aquí para permitir ejecutar comandos que no requieren DB
 }
 export const ENV = parsed.success
     ? parsed.data

@@ -26,6 +26,7 @@ import { ClientModal } from "@/components/ClientModal";
 import { useOrder } from "@/providers/order/OrderProvider";
 import { SmartTouchable as Touchable } from "@/components/ui/touchable";
 import * as Haptics from "expo-haptics";
+import * as ImagePicker from "expo-image-picker";
 
 export default function ScanScreen() {
   const scheme = useColorScheme() ?? "light";
@@ -34,6 +35,8 @@ export default function ScanScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [torchOn, setTorchOn] = useState(false);
   const [facing, setFacing] = useState<"front" | "back">("back");
+  const [imagePermission, requestImagePermission] =
+    ImagePicker.useMediaLibraryPermissions();
   const schemeKey = (useColorScheme() ?? "light") as keyof typeof Colors;
   const { selectedClient, clients, setSelectedClient, addClient } = useClient();
   const { items } = useOrder();
@@ -50,7 +53,6 @@ export default function ScanScreen() {
   const [baseHeaderHeight, setBaseHeaderHeight] = useState(0);
   const { height: winH } = useWindowDimensions();
   const camRef = useRef<any>(null);
-  const [aiPromptShown, setAiPromptShown] = useState(false);
   const [aiSearching, setAiSearching] = useState(false);
   const [aiModalOpen, setAiModalOpen] = useState(false);
   const [aiResults, setAiResults] = useState<any[]>([]);
@@ -58,8 +60,8 @@ export default function ScanScreen() {
   const [aiMode, setAiMode] = useState(false);
   const [focusCountdown, setFocusCountdown] = useState(0);
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
-  const [aiUsed, setAiUsed] = useState(false);
   const [scanIntroVisible, setScanIntroVisible] = useState(true);
+  const [showAiButton, setShowAiButton] = useState(false);
   const lastOcrAtRef = useRef<number>(0);
   const OCR_THROTTLE_MS = 10000; // 10s entre llamadas OCR
 
@@ -79,11 +81,94 @@ export default function ScanScreen() {
     Haptics.selectionAsync().catch(() => {});
     setTorchOn((t) => !t);
   }, []);
-  const toggleFacing = useCallback(
-    () => setFacing((f) => (f === "back" ? "front" : "back")),
+
+  const canScan = !!selectedClient;
+
+  // Mostrar botón de IA después de 10 segundos
+  useEffect(() => {
+    if (!canScan) return;
+    const timer = setTimeout(() => {
+      setShowAiButton(true);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [canScan]);
+
+  const getApiBaseUrl = () => {
+    // @ts-ignore
+    const envUrl = process?.env?.EXPO_PUBLIC_API_URL as string | undefined;
+    if (envUrl) return envUrl;
+    // Android emulador usa 10.0.2.2 hacia host
+    if (Platform.OS === "android") return "http://10.0.2.2:3000";
+    return "http://localhost:3000";
+  };
+
+  const callOcr = useCallback(
+    async (base64: string, maxResults: number = 5) => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      try {
+        const resp = await fetch(`${getApiBaseUrl()}/api/ocr`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageBase64: base64, maxResults }),
+          signal: controller.signal,
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        return await resp.json();
+      } finally {
+        clearTimeout(timeout);
+      }
+    },
     []
   );
-  const canScan = !!selectedClient;
+
+  const pickImageAndScan = useCallback(async () => {
+    if (!canScan || aiSearching || aiMode || cooldownSeconds > 0) return;
+    if (Date.now() - lastOcrAtRef.current < OCR_THROTTLE_MS) return;
+
+    try {
+      if (!imagePermission?.granted) {
+        const result = await requestImagePermission();
+        if (!result.granted) {
+          Alert.alert(
+            "Permiso requerido",
+            "Necesitamos acceso a tus fotos para escanear productos."
+          );
+          return;
+        }
+      }
+
+      Haptics.selectionAsync().catch(() => {});
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.65,
+        base64: true,
+      });
+
+      if (result.canceled || !result.assets?.[0]?.base64) return;
+
+      setAiSearching(true);
+      const data = await callOcr(result.assets[0].base64, 5);
+      setAiResults(Array.isArray(data?.matches) ? data.matches : []);
+      setAiText(typeof data?.text === "string" ? data.text : "");
+      setAiModalOpen(true);
+      lastOcrAtRef.current = Date.now();
+    } catch (err: any) {
+      Alert.alert("Error", "No se pudo procesar la imagen. Intentá de nuevo.");
+    } finally {
+      setAiSearching(false);
+    }
+  }, [
+    canScan,
+    aiSearching,
+    aiMode,
+    cooldownSeconds,
+    imagePermission,
+    requestImagePermission,
+    callOcr,
+  ]);
 
   const simulateScan = useCallback(() => {
     if (!canScan) return;
@@ -151,49 +236,11 @@ export default function ScanScreen() {
     [canScan, selectedClient, aiMode, aiSearching, cooldownSeconds, router]
   );
 
-  // Alert inicial IA
-  useEffect(() => {
-    if (
-      !canScan ||
-      aiPromptShown ||
-      aiSearching ||
-      aiMode ||
-      cooldownSeconds > 0 ||
-      aiUsed
-    )
-      return;
-    const t = setTimeout(() => {
-      if (!canScan) return;
-      setAiPromptShown(true);
-      Alert.alert(
-        "¿Buscar con IA?",
-        "Apuntá la cámara hacia la caja para leer marca y registro automáticamente.",
-        [
-          {
-            text: "No ahora",
-            style: "cancel",
-            onPress: () => setAiPromptShown(false),
-          },
-          {
-            text: "Sí, buscar",
-            onPress: () => {
-              setAiMode(true);
-              setFocusCountdown(3);
-              setAiUsed(true);
-            },
-          },
-        ]
-      );
-    }, 5000);
-    return () => clearTimeout(t);
-  }, [canScan, aiPromptShown, aiSearching, aiMode, cooldownSeconds, aiUsed]);
-
   const startManualAi = useCallback(() => {
     if (!canScan || aiSearching || aiMode || cooldownSeconds > 0) return;
     // Throttle duro por seguridad de costos
     if (Date.now() - lastOcrAtRef.current < OCR_THROTTLE_MS) return;
     Haptics.selectionAsync().catch(() => {});
-    setAiUsed(true);
     setAiMode(true);
     setFocusCountdown(3);
   }, [canScan, aiSearching, aiMode, cooldownSeconds]);
@@ -203,35 +250,6 @@ export default function ScanScreen() {
     const id = setInterval(() => setFocusCountdown((c) => c - 1), 1000);
     return () => clearInterval(id);
   }, [aiMode, focusCountdown]);
-
-  const getApiBaseUrl = () => {
-    // @ts-ignore
-    const envUrl = process?.env?.EXPO_PUBLIC_API_URL as string | undefined;
-    if (envUrl) return envUrl;
-    // Android emulador usa 10.0.2.2 hacia host
-    if (Platform.OS === "android") return "http://10.0.2.2:3000";
-    return "http://localhost:3000";
-  };
-
-  const callOcr = useCallback(
-    async (base64: string, maxResults: number = 5) => {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15000);
-      try {
-        const resp = await fetch(`${getApiBaseUrl()}/api/ocr`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageBase64: base64, maxResults }),
-          signal: controller.signal,
-        });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        return await resp.json();
-      } finally {
-        clearTimeout(timeout);
-      }
-    },
-    []
-  );
 
   useEffect(() => {
     const run = async () => {
@@ -279,7 +297,6 @@ export default function ScanScreen() {
     setAiMode(false);
     // Cooldown más largo para evitar llamadas consecutivas costosas
     setCooldownSeconds(10);
-    setAiPromptShown(false);
   };
 
   return (
@@ -470,34 +487,51 @@ export default function ScanScreen() {
                 size={22}
                 color='#FFF'
               />
+              <Text style={styles.btnLabel}>Flash</Text>
             </Touchable>
+            {showAiButton ? (
+              <Touchable
+                onPress={startManualAi}
+                disabled={
+                  !canScan || aiSearching || aiMode || cooldownSeconds > 0
+                }
+                style={[
+                  styles.controlBtn,
+                  styles.aiBtn,
+                  {
+                    backgroundColor:
+                      canScan &&
+                      !aiSearching &&
+                      !aiMode &&
+                      cooldownSeconds === 0
+                        ? "#FFB300"
+                        : "rgba(0,0,0,0.35)",
+                  },
+                ]}
+              >
+                <IconSymbol name='sparkles' size={24} color='#FFF' />
+                <Text style={[styles.btnLabel, styles.aiBtnLabel]}>
+                  Buscar con IA
+                </Text>
+              </Touchable>
+            ) : (
+              <View style={[styles.controlBtn, styles.aiBtn]}>
+                <IconSymbol name='qrcode.viewfinder' size={26} color='#FFF' />
+                <Text style={styles.btnLabel}>Escanear</Text>
+              </View>
+            )}
             <Touchable
-              onPress={aiUsed ? startManualAi : simulateScan}
+              onPress={pickImageAndScan}
+              disabled={!canScan || aiSearching || cooldownSeconds > 0}
               style={[
                 styles.controlBtn,
                 {
-                  backgroundColor: canScan
-                    ? Colors[scheme].primary
-                    : "rgba(0,0,0,0.35)",
+                  backgroundColor: "rgba(0,0,0,0.35)",
                 },
               ]}
             >
-              <IconSymbol
-                name={aiUsed ? "camera" : "qrcode.viewfinder"}
-                size={26}
-                color='#FFF'
-              />
-            </Touchable>
-            <Touchable
-              onPress={toggleFacing}
-              style={[
-                styles.controlBtn,
-                facing === "front" && {
-                  backgroundColor: Colors[scheme].primary,
-                },
-              ]}
-            >
-              <IconSymbol name='camera.rotate' size={22} color='#FFF' />
+              <IconSymbol name='photo' size={22} color='#FFF' />
+              <Text style={styles.btnLabel}>Galería</Text>
             </Touchable>
           </View>
         </View>
@@ -517,26 +551,44 @@ export default function ScanScreen() {
             ]}
             onStartShouldSetResponder={() => true}
           >
-            <ThemedText type='subtitle'>Resultados OCR</ThemedText>
-            <ThemedText style={{ opacity: 0.8, marginTop: 6 }}>
-              Texto detectado (resumen):
-            </ThemedText>
-            <Text numberOfLines={3} style={{ marginTop: 4 }}>
-              {aiText}
-            </Text>
+            <ThemedText type='subtitle'>Coincidencias encontradas</ThemedText>
             <View style={{ marginTop: 12 }}>
               {aiResults.length === 0 ? (
                 <ThemedText>No se encontraron coincidencias</ThemedText>
               ) : (
                 aiResults.slice(0, 5).map((m, i) => (
-                  <View key={i} style={styles.matchRow}>
+                  <Touchable
+                    key={i}
+                    style={styles.matchRow}
+                    onPress={() => {
+                      Haptics.impactAsync(
+                        Haptics.ImpactFeedbackStyle.Light
+                      ).catch(() => {});
+                      closeModal();
+                      // Navegar a confirm con el producto completo serializado
+                      router.push({
+                        pathname: "/confirm",
+                        params: {
+                          productData: JSON.stringify(m),
+                          type: "ocr",
+                          client: selectedClient?.number ?? "",
+                          source: "ai",
+                        },
+                      });
+                    }}
+                  >
                     <ThemedText style={{ fontWeight: "600" }}>
                       {m.marca || "(Sin marca)"}
                     </ThemedText>
-                    <ThemedText style={{ opacity: 0.8 }}>
+                    <ThemedText style={{ opacity: 0.8, fontSize: 12 }}>
                       Inscripción: {m.numeroInscripcion || "-"}
                     </ThemedText>
-                  </View>
+                    {m.firma && (
+                      <ThemedText style={{ opacity: 0.6, fontSize: 11 }}>
+                        {m.firma}
+                      </ThemedText>
+                    )}
+                  </Touchable>
                 ))
               )}
             </View>
@@ -566,9 +618,16 @@ export default function ScanScreen() {
       {aiMode && focusCountdown > 0 && (
         <View style={styles.aiModeOverlay}>
           <View style={styles.aiBadge}>
-            <Text style={styles.aiBadgeText}>MODO IA</Text>
+            <IconSymbol name='sparkles' size={18} color='#000' />
+            <Text style={styles.aiBadgeText}>BÚSQUEDA IA</Text>
           </View>
-          <Text style={styles.aiOverlayTitle}>Enfocá el producto</Text>
+          <IconSymbol name='viewfinder' size={80} color='#FFB300' />
+          <Text style={styles.aiOverlayTitle}>
+            Apuntá la cámara al producto
+          </Text>
+          <Text style={styles.aiOverlaySubtitle}>
+            Enfocá la etiqueta con marca y número de registro
+          </Text>
           <Text style={styles.aiOverlayCountdown}>
             Capturando en {focusCountdown}s…
           </Text>
@@ -687,14 +746,31 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-around",
     alignItems: "center",
+    gap: 12,
   },
   controlBtn: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    minWidth: 70,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 16,
     backgroundColor: "rgba(0,0,0,0.5)",
     justifyContent: "center",
     alignItems: "center",
+    gap: 4,
+  },
+  aiBtn: {
+    flex: 1,
+    maxWidth: 160,
+  },
+  btnLabel: {
+    color: "#FFF",
+    fontSize: 11,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  aiBtnLabel: {
+    fontSize: 12,
+    fontWeight: "700",
   },
   finishBtn: {
     flexDirection: "row",
@@ -713,9 +789,13 @@ const styles = StyleSheet.create({
   },
   modalCard: { width: "100%", maxWidth: 480, borderRadius: 12, padding: 16 },
   matchRow: {
-    paddingVertical: 6,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#ccc",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginVertical: 4,
+    borderRadius: 8,
+    backgroundColor: "rgba(0,0,0,0.03)",
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
   },
   modalBtn: {
     flex: 1,
@@ -750,18 +830,41 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 50,
     backgroundColor: "#FFB300",
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 24,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
   },
-  aiBadgeText: { color: "#000", fontWeight: "700", letterSpacing: 1 },
+  aiBadgeText: {
+    color: "#000",
+    fontWeight: "700",
+    letterSpacing: 1.2,
+    fontSize: 13,
+  },
   aiOverlayTitle: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: "700",
     color: "#FFF",
+    marginTop: 24,
     marginBottom: 8,
+    textAlign: "center",
   },
-  aiOverlayCountdown: { fontSize: 16, color: "#FFF", opacity: 0.9 },
+  aiOverlaySubtitle: {
+    fontSize: 15,
+    color: "#FFF",
+    opacity: 0.85,
+    marginBottom: 16,
+    textAlign: "center",
+    paddingHorizontal: 32,
+  },
+  aiOverlayCountdown: {
+    fontSize: 17,
+    color: "#FFB300",
+    fontWeight: "600",
+    textAlign: "center",
+  },
   cooldownOverlay: {
     position: "absolute",
     bottom: 110,

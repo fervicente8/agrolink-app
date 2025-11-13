@@ -29,11 +29,6 @@ const EnvSchema = z.object({
 
 const parsed = EnvSchema.safeParse(process.env);
 
-if (!parsed.success) {
-  console.error("Error de configuración .env:", parsed.error.format());
-  // No lanzamos aquí para permitir ejecutar comandos que no requieren DB
-}
-
 export const ENV = parsed.success
   ? parsed.data
   : {

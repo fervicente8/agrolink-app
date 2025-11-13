@@ -2,7 +2,6 @@ import axios from "axios";
 // @ts-ignore (tipado opcional de cli-progress si no está disponible)
 import { SingleBar, Presets } from "cli-progress";
 import { wrapper } from "axios-cookiejar-support";
-import { CookieJar } from "tough-cookie";
 import { logger } from "../logger.js";
 import { ProductoSenasa } from "../models/ProductoSenasa.js";
 import { connectMongo, disconnectMongo } from "../db/mongo.js";
@@ -127,18 +126,17 @@ async function fetchDetail(id: number) {
 
   const res: any = await withRetry(() => http.get(url));
   const detailToReturn = {
-    id: res.data?.id ?? null,
     pais: res?.data?.pais ?? null,
     estadoProducto: res?.data?.estadoProducto ?? null,
-    numeroInscripcion: res?.data?.numeroInscripcion ?? null,
     tipoProducto: res?.data?.tipoProducto ?? null,
     fechaInscripcion: res?.data?.fechaInscripcion ?? null,
     motivoBaja: res?.data?.motivoBaja ?? null,
-    envases: res?.data?.envases ?? null,
     principiosActivos: res?.data?.principiosActivos ?? null,
-    productosFirmas: res?.data?.productosFirmas ?? null,
   };
-  return detailToReturn;
+  return {
+    detalle: detailToReturn,
+    envases: res?.data?.envases ?? [],
+  };
 }
 
 function stripHtml(input: string | null | undefined) {
@@ -210,9 +208,12 @@ export async function runScraper() {
       } as any;
 
       let detalle: any = null;
+      let envases: any[] = [];
       try {
         await sleep(jitter());
-        detalle = await fetchDetail(id);
+        const result = await fetchDetail(id);
+        detalle = result.detalle;
+        envases = result.envases;
       } catch (err: any) {
         const status = err?.response?.status;
         const snippet = dataSnippet(err?.response?.data);
@@ -225,6 +226,7 @@ export async function runScraper() {
 
       const fullDoc = {
         ...baseDoc,
+        envases,
         detalle,
         detalleError: detalle ? undefined : "fetch_failed_403",
       };

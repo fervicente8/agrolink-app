@@ -1,21 +1,36 @@
 import React, { useState } from "react";
-import { Modal, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import {
+  Modal,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+  Alert,
+} from "react-native";
 import { ThemedText } from "@/components/themed-text";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { Colors } from "@/constants/theme";
 import { SmartTouchable as Touchable } from "@/components/ui/touchable";
 import * as Haptics from "expo-haptics";
 
-export type Client = { number: string; name?: string };
+export type Client = {
+  _id?: string;
+  number: string;
+  name: string;
+  telefono?: string;
+  email?: string;
+  direccion?: string;
+  notas?: string;
+};
 
 export type ClientModalProps = {
   open: boolean;
   onClose: () => void;
   clients: Client[];
-  select: (c: Client) => void;
+  select: (c: Client | null) => void;
   adding: boolean;
   setAdding: (v: boolean) => void;
-  addClient: (c: Client) => void;
+  addClient: (c: Omit<Client, "_id">) => Promise<void>;
   scheme: keyof typeof Colors;
   selectedClient?: Client | null;
   newNumber: string;
@@ -46,8 +61,7 @@ export function ClientModal({
     : clients.filter((c) => {
         const q = query.toLowerCase();
         return (
-          c.number.toLowerCase().includes(q) ||
-          (c.name?.toLowerCase().includes(q) ?? false)
+          c.number.toLowerCase().includes(q) || c.name.toLowerCase().includes(q)
         );
       });
 
@@ -139,7 +153,7 @@ export function ClientModal({
                   ]}
                 />
                 <TextInput
-                  placeholder='Nombre (opcional)'
+                  placeholder='Nombre *'
                   placeholderTextColor={"#888"}
                   value={newName}
                   onChangeText={setNewName}
@@ -165,28 +179,36 @@ export function ClientModal({
                     </ThemedText>
                   </Touchable>
                   <Touchable
-                    disabled={!newNumber.trim()}
+                    disabled={!newNumber.trim() || !newName.trim()}
                     style={[
                       styles.modalBtn,
                       {
-                        backgroundColor: newNumber.trim()
-                          ? Colors[scheme].primary
-                          : "#B5BDBC",
+                        backgroundColor:
+                          newNumber.trim() && newName.trim()
+                            ? Colors[scheme].primary
+                            : "#B5BDBC",
                       },
                     ]}
-                    onPress={() => {
-                      if (!newNumber.trim()) return;
-                      addClient({
-                        number: newNumber.trim(),
-                        name: newName.trim() || undefined,
-                      });
-                      Haptics.notificationAsync(
-                        Haptics.NotificationFeedbackType.Success
-                      ).catch(() => {});
-                      setAdding(false);
-                      setNewName("");
-                      setNewNumber("");
-                      onClose();
+                    onPress={async () => {
+                      if (!newNumber.trim() || !newName.trim()) return;
+                      try {
+                        await addClient({
+                          number: newNumber.trim(),
+                          name: newName.trim(),
+                        });
+                        Haptics.notificationAsync(
+                          Haptics.NotificationFeedbackType.Success
+                        ).catch(() => {});
+                        setAdding(false);
+                        setNewName("");
+                        setNewNumber("");
+                        onClose();
+                      } catch (error: any) {
+                        Alert.alert(
+                          "Error",
+                          error.message || "No se pudo crear el cliente"
+                        );
+                      }
                     }}
                   >
                     <ThemedText
@@ -222,11 +244,9 @@ export function ClientModal({
                     <ThemedText style={{ fontWeight: "600" }}>
                       {"N° " + c.number}
                     </ThemedText>
-                    {c.name && (
-                      <ThemedText style={{ fontSize: 12, opacity: 0.7 }}>
-                        {c.name}
-                      </ThemedText>
-                    )}
+                    <ThemedText style={{ fontSize: 12, opacity: 0.7 }}>
+                      {c.name}
+                    </ThemedText>
                   </Touchable>
                 ))}
               </>
@@ -280,6 +300,7 @@ const styles = StyleSheet.create({
   modalBtn: {
     flex: 1,
     paddingVertical: 12,
+    paddingHorizontal: 10,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 12,

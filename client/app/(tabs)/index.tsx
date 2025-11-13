@@ -149,7 +149,7 @@ export default function HomeScreen() {
               lightColor='#E9FFF4'
               darkColor='#E9FFF4'
             >
-              {user?.name ? `Bienvenido ${user.name}` : "Bienvenido"}
+              {user?.nombre ? `Bienvenido ${user.nombre}` : "Bienvenido"}
             </ThemedText>
           </View>
           <Touchable
@@ -333,7 +333,7 @@ export default function HomeScreen() {
             </View>
             <View style={{ gap: 4 }}>
               <ThemedText style={{ fontSize: 14, fontWeight: "600" }}>
-                {user?.name}
+                {user?.nombre}
               </ThemedText>
               <ThemedText style={{ fontSize: 12, opacity: 0.7 }}>
                 {user?.email}

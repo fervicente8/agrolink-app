@@ -1,5 +1,12 @@
-import React, { useMemo, useState } from "react";
-import { StyleSheet, View, Image, ScrollView, TextInput } from "react-native";
+import React, { useMemo, useState, useEffect } from "react";
+import {
+  StyleSheet,
+  View,
+  Image,
+  ScrollView,
+  TextInput,
+  Alert,
+} from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "@/hooks/use-color-scheme";
@@ -19,34 +26,198 @@ export default function ConfirmScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const get = (v: any) => (Array.isArray(v) ? v[0] : v) as string | undefined;
-  const code = get((params as any).code);
+  const productDataStr = get((params as any).productData);
   const client = get((params as any).client);
   const source = get((params as any).source);
   const { addTrace } = useOrder();
   const { selectedClient } = useClient();
 
-  // Datos mockeados
-  const [count, setCount] = useState(4);
-  const unitLabel = "bidones (5L c/u)";
+  // Parse product data from SENASA
+  const productData = useMemo(() => {
+    if (!productDataStr) return null;
+    try {
+      return JSON.parse(productDataStr);
+    } catch (e) {
+      return null;
+    }
+  }, [productDataStr]);
+
+  // Paso 1: Extraer envases únicos por capacidad
+  const envasesDisponibles = useMemo(() => {
+    if (!productData?.envases || productData.envases.length === 0) return [];
+
+    const envases = productData.envases.filter((e: any) => e.envaseActivo);
+
+    // Agrupar por capacidad única
+    const uniqueCapacidades = new Map();
+    envases.forEach((e: any) => {
+      const capacidad = e.capacidadUsada || e.capacidadTotal;
+      const unidad =
+        e.unidadMedidaUsada?.siglaEstandarizada ||
+        e.unidadMedidaUsada?.descripcion ||
+        "unidad";
+      const key = `${capacidad}_${unidad}`;
+
+      if (!uniqueCapacidades.has(key)) {
+        uniqueCapacidades.set(key, {
+          capacidad,
+          unidad: unidad.toLowerCase(),
+          envases: [],
+        });
+      }
+      uniqueCapacidades.get(key).envases.push(e);
+    });
+
+    return Array.from(uniqueCapacidades.values());
+  }, [productData]);
+
+  // Paso 2: Estados de selección
+  const [selectedCapacidad, setSelectedCapacidad] = useState<any>(null);
+  const [selectedEnvase, setSelectedEnvase] = useState<any>(null);
+
+  // Materiales disponibles según capacidad seleccionada
+  const materialesDisponibles = useMemo(() => {
+    if (!selectedCapacidad) return [];
+
+    const materiales = new Map();
+    selectedCapacidad.envases.forEach((e: any) => {
+      const material = e.envaseMaterial?.descripcion || "Sin especificar";
+      const tipo = e.envase?.nombre || "Envase";
+      const key = `${material}_${tipo}`;
+
+      if (!materiales.has(key)) {
+        materiales.set(key, {
+          material,
+          tipo,
+          envaseData: e,
+        });
+      }
+    });
+
+    return Array.from(materiales.values());
+  }, [selectedCapacidad]);
+
+  // Detect missing critical fields
+  const missingFields = useMemo(() => {
+    if (!productData) return [];
+    const missing: string[] = [];
+    if (!productData.marca) missing.push("Marca");
+    if (!productData.numeroInscripcion) missing.push("Número de Inscripción");
+    if (!productData.firma) missing.push("Firma/Fabricante");
+    if (!productData.claseToxicologica) missing.push("Clase Toxicológica");
+    if (!productData.sustanciasActivas) missing.push("Sustancias Activas");
+    return missing;
+  }, [productData]);
+
+  // Show alert for missing fields
+  useEffect(() => {
+    if (missingFields.length > 0) {
+      Alert.alert(
+        "⚠️ Campos Incompletos",
+        `Este producto no tiene información sobre: ${missingFields.join(
+          ", "
+        )}. Podrás completar estos datos manualmente.`,
+        [{ text: "Entendido" }]
+      );
+    }
+  }, [missingFields]);
+
+  // Estado de cantidad y unidad
+  const [count, setCount] = useState(1);
   const [editMode, setEditMode] = useState(false);
 
-  // Campos editables
-  const [productName, setProductName] = useState("ADAMA Linuron 50 FW");
-  const [productSubtitle, setProductSubtitle] = useState(
-    "Herbicida - Grupo C2 - ADAMA Essentials"
+  // Campos editables inicializados con datos SENASA
+  const [productName, setProductName] = useState(
+    productData?.marca || "Producto sin nombre"
   );
-  const [codeVal, setCodeVal] = useState<string>(code || "");
+  const [productSubtitle, setProductSubtitle] = useState(
+    productData?.detalle?.tipoProducto?.descripcion || "Sin descripción"
+  );
+  const [codeVal, setCodeVal] = useState<string>(
+    productData?.numeroInscripcion || ""
+  );
   const [clientVal, setClientVal] = useState<string>(
     client || selectedClient?.number || ""
   );
-  const [senasaId, setSenasaId] = useState("Nº 32.221");
-  const [lot, setLot] = useState("2508108-0");
-  const [fabricante, setFabricante] = useState("ADAMA Argentina S.A.");
-  const [origen, setOrigen] = useState("Israel");
-  const [fechaProd, setFechaProd] = useState("08/2025");
-  const [vencimiento, setVencimiento] = useState("08/2027");
-  const [presentacion, setPresentacion] = useState("4 bidones × 5 litros");
-  const totalLitros = useMemo(() => count * 5, [count]);
+  const [senasaId, setSenasaId] = useState(
+    productData?.numeroInscripcion
+      ? `Nº ${productData.numeroInscripcion}`
+      : "Sin inscripción"
+  );
+  const [fabricante, setFabricante] = useState(
+    productData?.firma || "Sin información"
+  );
+  const [claseTox, setClaseTox] = useState(
+    productData?.claseToxicologica || "Sin clasificar"
+  );
+  const [sustancias, setSustancias] = useState(
+    productData?.sustanciasActivas || "No especificadas"
+  );
+  const [estadoProducto, setEstadoProducto] = useState(
+    productData?.detalle?.estadoProducto?.descripcion || "Sin estado"
+  );
+  const [comercializacion, setComercializacion] = useState(
+    productData?.comercializacionActiva !== undefined
+      ? productData.comercializacionActiva
+        ? "Activa"
+        : "Inactiva"
+      : "Sin información"
+  );
+
+  // Campos que el usuario debe completar (no vienen de SENASA)
+  const [lot, setLot] = useState("");
+  const [fechaProd, setFechaProd] = useState("");
+  const [vencimiento, setVencimiento] = useState("");
+  const [presentacion, setPresentacion] = useState("");
+  const [capacidad, setCapacidad] = useState("");
+
+  // Auto-completar capacidad cuando se selecciona envase
+  useEffect(() => {
+    if (selectedEnvase && selectedCapacidad) {
+      const cap = selectedCapacidad.capacidad;
+      const unidad = selectedCapacidad.unidad;
+      setCapacidad(`${cap}${unidad}`);
+    } else {
+      // Limpiar capacidad si no hay envase seleccionado
+      setCapacidad("");
+    }
+  }, [selectedEnvase, selectedCapacidad]);
+
+  // Auto-completar presentación incluyendo cantidad
+  useEffect(() => {
+    if (selectedEnvase && selectedCapacidad && count > 0) {
+      const cap = selectedCapacidad.capacidad;
+      const unidad = selectedCapacidad.unidad;
+      const material = selectedEnvase.material;
+      let tipo = selectedEnvase.tipo;
+
+      // Pluralizar el tipo de envase si count > 1
+      if (count > 1) {
+        // Casos comunes de pluralización
+        if (tipo.endsWith("l")) {
+          tipo = tipo + "es"; // Balde -> Baldes, Barril -> Barriles
+        } else if (tipo.endsWith("a")) {
+          tipo = tipo + "s"; // Botella -> Botellas, Lata -> Latas
+        } else if (tipo.endsWith("n")) {
+          tipo = tipo + "es"; // Bidón -> Bidones
+        } else if (!tipo.endsWith("s")) {
+          tipo = tipo + "s"; // Caso general
+        }
+      }
+
+      setPresentacion(`${count} ${tipo} de ${material} × ${cap}${unidad}`);
+    } else {
+      // Limpiar presentación si no hay envase completo seleccionado
+      setPresentacion("");
+    }
+  }, [selectedEnvase, selectedCapacidad, count]);
+
+  const totalLitros = useMemo(() => {
+    const capNum = parseFloat(capacidad) || 0;
+    return count * capNum;
+  }, [count, capacidad]);
+
+  const unitLabel = capacidad ? `unidades (${capacidad} c/u)` : "unidades";
 
   // imagen del logo para mock del producto
   const logo = require("../assets/images/logo.png");
@@ -99,6 +270,182 @@ export default function ConfirmScreen() {
           </View>
         </View>
 
+        {/* Selector de envase - Paso 1: Capacidad */}
+        {envasesDisponibles.length > 0 ? (
+          <View
+            style={[
+              styles.card,
+              { backgroundColor: Colors[scheme].card, gap: 12 },
+            ]}
+          >
+            <View
+              style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+            >
+              <View
+                style={[
+                  styles.stepBadge,
+                  {
+                    backgroundColor: selectedCapacidad
+                      ? Colors[scheme].primary
+                      : "#999",
+                  },
+                ]}
+              >
+                <ThemedText
+                  lightColor='#FFF'
+                  darkColor='#FFF'
+                  style={{ fontSize: 12, fontWeight: "700" }}
+                >
+                  1
+                </ThemedText>
+              </View>
+              <ThemedText style={{ fontSize: 16, fontWeight: "700" }}>
+                Selecciona Capacidad y Unidad
+              </ThemedText>
+            </View>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {envasesDisponibles.map((opt: any, idx: number) => (
+                <Touchable
+                  key={idx}
+                  onPress={() => {
+                    Haptics.selectionAsync().catch(() => {});
+                    setSelectedCapacidad(opt);
+                    setSelectedEnvase(null); // Reset paso 2
+                  }}
+                  style={[
+                    styles.optionChip,
+                    {
+                      backgroundColor:
+                        selectedCapacidad === opt
+                          ? Colors[scheme].primary
+                          : Colors[scheme].surface,
+                      borderColor:
+                        selectedCapacidad === opt
+                          ? Colors[scheme].primary
+                          : Colors[scheme].border,
+                    },
+                  ]}
+                >
+                  <ThemedText
+                    style={{
+                      fontWeight: selectedCapacidad === opt ? "700" : "600",
+                      fontSize: 14,
+                    }}
+                    lightColor={
+                      selectedCapacidad === opt ? "#FFF" : Colors[scheme].text
+                    }
+                    darkColor={
+                      selectedCapacidad === opt ? "#FFF" : Colors[scheme].text
+                    }
+                  >
+                    {opt.capacidad} {opt.unidad}
+                  </ThemedText>
+                </Touchable>
+              ))}
+            </View>
+          </View>
+        ) : productData?.envases ? (
+          <View
+            style={[
+              styles.card,
+              { backgroundColor: Colors[scheme].card, gap: 8 },
+            ]}
+          >
+            <ThemedText
+              style={{ fontSize: 14, fontWeight: "600", opacity: 0.7 }}
+            >
+              ⚠️ No se encontraron envases activos para este producto
+            </ThemedText>
+            <ThemedText style={{ fontSize: 12, opacity: 0.5 }}>
+              Total de envases en data: {productData.envases.length}
+            </ThemedText>
+          </View>
+        ) : null}
+
+        {/* Selector de envase - Paso 2: Material */}
+        {selectedCapacidad && materialesDisponibles.length > 0 && (
+          <View
+            style={[
+              styles.card,
+              { backgroundColor: Colors[scheme].card, gap: 12 },
+            ]}
+          >
+            <View
+              style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+            >
+              <View
+                style={[
+                  styles.stepBadge,
+                  {
+                    backgroundColor: selectedEnvase
+                      ? Colors[scheme].primary
+                      : "#999",
+                  },
+                ]}
+              >
+                <ThemedText
+                  lightColor='#FFF'
+                  darkColor='#FFF'
+                  style={{ fontSize: 12, fontWeight: "700" }}
+                >
+                  2
+                </ThemedText>
+              </View>
+              <ThemedText style={{ fontSize: 16, fontWeight: "700" }}>
+                Selecciona Material del Envase
+              </ThemedText>
+            </View>
+            <View style={{ gap: 8 }}>
+              {materialesDisponibles.map((mat: any, idx: number) => (
+                <Touchable
+                  key={idx}
+                  onPress={() => {
+                    Haptics.selectionAsync().catch(() => {});
+                    setSelectedEnvase(mat);
+                  }}
+                  style={[
+                    styles.optionCard,
+                    {
+                      backgroundColor:
+                        selectedEnvase === mat
+                          ? Colors[scheme].primary + "20"
+                          : Colors[scheme].surface,
+                      borderColor:
+                        selectedEnvase === mat
+                          ? Colors[scheme].primary
+                          : Colors[scheme].border,
+                    },
+                  ]}
+                >
+                  <IconSymbol
+                    name={
+                      selectedEnvase === mat
+                        ? "checkmark.circle.fill"
+                        : "circle"
+                    }
+                    size={22}
+                    color={
+                      selectedEnvase === mat
+                        ? (Colors[scheme].primary as string)
+                        : "#999"
+                    }
+                  />
+                  <View style={{ flex: 1 }}>
+                    <ThemedText style={{ fontWeight: "600" }}>
+                      {mat.tipo}
+                    </ThemedText>
+                    <ThemedText
+                      style={{ fontSize: 12, opacity: 0.7, lineHeight: 18 }}
+                    >
+                      {mat.material}
+                    </ThemedText>
+                  </View>
+                </Touchable>
+              ))}
+            </View>
+          </View>
+        )}
+
         {/* Datos del producto */}
         <View
           style={[
@@ -135,65 +482,118 @@ export default function ConfirmScreen() {
           <View style={styles.divider} />
           {source && (
             <ThemedText style={{ fontSize: 12, opacity: 0.8 }}>
-              Origen: {source === "manual" ? "Ingreso Manual" : "Escaneo"}
+              Origen:{" "}
+              {source === "ai"
+                ? "Búsqueda IA"
+                : source === "manual"
+                ? "Ingreso Manual"
+                : "Escaneo"}
             </ThemedText>
           )}
-          <TwoCol
-            label='Código'
-            value={codeVal}
-            full
-            editable={editMode}
-            onChangeText={setCodeVal}
-          />
-          <TwoCol
-            label='Cliente'
-            value={clientVal}
-            full
-            editable={editMode}
-            onChangeText={setClientVal}
-          />
+
+          {/* Datos SENASA */}
+          <ThemedText style={{ fontSize: 14, fontWeight: "700", marginTop: 8 }}>
+            📋 Información SENASA
+          </ThemedText>
           <TwoCol
             label='ID SENASA'
             value={senasaId}
             editable={editMode}
             onChangeText={setSenasaId}
+            missing={!productData?.numeroInscripcion}
+          />
+          <TwoCol
+            label='Código'
+            value={codeVal}
+            editable={editMode}
+            onChangeText={setCodeVal}
+            missing={!productData?.numeroInscripcion}
+          />
+          <TwoCol
+            label='Fabricante/Firma'
+            value={fabricante}
+            full
+            editable={editMode}
+            onChangeText={setFabricante}
+            missing={!productData?.firma}
+          />
+          <TwoCol
+            label='Clase Toxicológica'
+            value={claseTox}
+            editable={editMode}
+            onChangeText={setClaseTox}
+            missing={!productData?.claseToxicologica}
+          />
+          <TwoCol
+            label='Estado Producto'
+            value={estadoProducto}
+            editable={editMode}
+            onChangeText={setEstadoProducto}
+          />
+          <TwoCol
+            label='Comercialización'
+            value={comercializacion}
+            editable={editMode}
+            onChangeText={setComercializacion}
+          />
+          <TwoCol
+            label='Sustancias Activas'
+            value={sustancias}
+            full
+            editable={editMode}
+            onChangeText={setSustancias}
+            missing={!productData?.sustanciasActivas}
+          />
+
+          {/* Datos de trazabilidad (usuario completa) */}
+          <View style={styles.divider} />
+          <ThemedText style={{ fontSize: 14, fontWeight: "700", marginTop: 8 }}>
+            📦 Información de Trazabilidad
+          </ThemedText>
+          <TwoCol
+            label='Cliente'
+            value={clientVal}
+            editable={editMode}
+            onChangeText={setClientVal}
           />
           <TwoCol
             label='Lote'
             value={lot}
-            editable={editMode}
+            editable={editMode || !lot}
             onChangeText={setLot}
+            placeholder='Ingresar lote'
+            missing={!lot}
           />
           <TwoCol
-            label='Fabricante'
-            value={fabricante}
-            editable={editMode}
-            onChangeText={setFabricante}
+            label='Capacidad por unidad'
+            value={capacidad}
+            editable={false}
+            placeholder='Selecciona envase arriba'
+            missing={!capacidad}
           />
           <TwoCol
-            label='Origen'
-            value={origen}
-            editable={editMode}
-            onChangeText={setOrigen}
-          />
-          <TwoCol
-            label='Fecha Prod.'
+            label='Fecha Producción'
             value={fechaProd}
-            editable={editMode}
+            editable={editMode || !fechaProd}
             onChangeText={setFechaProd}
+            placeholder='MM/AAAA'
+            missing={!fechaProd}
           />
           <TwoCol
             label='Vencimiento'
             value={vencimiento}
-            editable={editMode}
+            editable={editMode || !vencimiento}
             onChangeText={setVencimiento}
+            placeholder='MM/AAAA'
+            missing={!vencimiento}
           />
           <TwoCol
             label='Presentación'
             value={presentacion}
             full
-            editable={editMode}
-            onChangeText={setPresentacion}
+            editable={false}
+            placeholder='Se completa automáticamente'
+            missing={!presentacion}
           />
         </View>
 
@@ -271,6 +671,15 @@ export default function ConfirmScreen() {
             { backgroundColor: Colors[scheme].primary },
           ]}
           onPress={() => {
+            // Validar campos críticos antes de guardar
+            if (!lot || !capacidad || !fechaProd || !vencimiento) {
+              Alert.alert(
+                "⚠️ Campos Requeridos",
+                "Por favor completa: Lote, Capacidad (selecciona envase), Fecha de Producción y Vencimiento antes de confirmar.",
+                [{ text: "OK" }]
+              );
+              return;
+            }
             // Guardar traza en pedido y volver a escanear
             const qty = count;
             addTrace({
@@ -279,8 +688,15 @@ export default function ConfirmScreen() {
               productCode: senasaId,
               lot: lot,
               qty,
-              unit: "bidones",
-              totalLiters: qty * 5,
+              unit: capacidad ? `unidades (${capacidad})` : "unidades",
+              totalLiters: totalLitros,
+              // Datos adicionales SENASA
+              firma: fabricante,
+              claseToxicologica: claseTox,
+              sustanciasActivas: sustancias,
+              fechaProduccion: fechaProd,
+              vencimiento: vencimiento,
+              presentacion: presentacion,
             });
             Haptics.notificationAsync(
               Haptics.NotificationFeedbackType.Success
@@ -326,26 +742,45 @@ function TwoCol({
   full,
   editable,
   onChangeText,
+  placeholder,
+  missing,
 }: {
   label: string;
   value: string;
   full?: boolean;
   editable?: boolean;
   onChangeText?: (t: string) => void;
+  placeholder?: string;
+  missing?: boolean;
 }) {
+  const scheme = useColorScheme() ?? "light";
   return (
     <View style={[styles.twoCol, full && { flexDirection: "column", gap: 4 }]}>
       <View style={styles.colItem}>
-        <ThemedText style={styles.label}>{label}</ThemedText>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+          <ThemedText style={styles.label}>{label}</ThemedText>
+          {missing && (
+            <ThemedText style={{ fontSize: 10, color: "#FF6B6B" }}>
+              ⚠️
+            </ThemedText>
+          )}
+        </View>
         {editable ? (
           <TextInput
             value={value}
             onChangeText={onChangeText}
-            style={styles.input}
-            placeholder={`Ingresar ${label.toLowerCase()}`}
+            style={[
+              styles.input,
+              { color: Colors[scheme].text as string },
+              missing && { borderBottomColor: "#FF6B6B" },
+            ]}
+            placeholder={placeholder || `Ingresar ${label.toLowerCase()}`}
+            placeholderTextColor='#999'
           />
         ) : (
-          <ThemedText style={styles.value}>{value}</ThemedText>
+          <ThemedText style={[styles.value, missing && { color: "#FF6B6B" }]}>
+            {value || "—"}
+          </ThemedText>
         )}
       </View>
       {!full && <View style={styles.colItem} />}
@@ -463,6 +898,28 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 14,
     borderRadius: 14,
+    borderWidth: 2,
+  },
+  stepBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  optionChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 2,
+  },
+  optionCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 12,
     borderWidth: 2,
   },
 });

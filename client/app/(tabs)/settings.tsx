@@ -10,15 +10,20 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SmartTouchable as Touchable } from "@/components/ui/touchable";
 import * as Haptics from "expo-haptics";
 import { useCameraPermissions } from "expo-camera";
+import * as ImagePicker from "expo-image-picker";
 
 export default function SettingsTab() {
   const { preference, setPreference } = useAppTheme();
   const scheme = useColorScheme() ?? "light";
   const insets = useSafeAreaInsets();
-  const [permission, requestPermission] = useCameraPermissions();
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [galleryPermission, requestGalleryPermission] =
+    ImagePicker.useMediaLibraryPermissions();
 
-  const granted = !!permission?.granted;
-  const canAskAgain = !!permission?.canAskAgain;
+  const cameraGranted = !!cameraPermission?.granted;
+  const cameraCanAskAgain = !!cameraPermission?.canAskAgain;
+  const galleryGranted = !!galleryPermission?.granted;
+  const galleryCanAskAgain = !!galleryPermission?.canAskAgain;
 
   const goToSystemSettings = useCallback(() => {
     Linking.openSettings().catch(() => {
@@ -34,9 +39,9 @@ export default function SettingsTab() {
       Haptics.selectionAsync().catch(() => {});
       if (value) {
         // Quieren activar permisos
-        if (granted) return; // Ya estaba activo
-        if (canAskAgain) {
-          const res = await requestPermission();
+        if (cameraGranted) return; // Ya estaba activo
+        if (cameraCanAskAgain) {
+          const res = await requestCameraPermission();
           if (!res.granted) {
             Alert.alert(
               "Permiso denegado",
@@ -70,7 +75,61 @@ export default function SettingsTab() {
         );
       }
     },
-    [granted, canAskAgain, requestPermission, goToSystemSettings]
+    [
+      cameraGranted,
+      cameraCanAskAgain,
+      requestCameraPermission,
+      goToSystemSettings,
+    ]
+  );
+
+  const onToggleGallery = useCallback(
+    async (value: boolean) => {
+      Haptics.selectionAsync().catch(() => {});
+      if (value) {
+        // Quieren activar permisos
+        if (galleryGranted) return; // Ya estaba activo
+        if (galleryCanAskAgain) {
+          const res = await requestGalleryPermission();
+          if (!res.granted) {
+            Alert.alert(
+              "Permiso denegado",
+              "Necesitás habilitar el acceso a la galería desde Ajustes.",
+              [
+                { text: "Cancelar", style: "cancel" },
+                { text: "Abrir Ajustes", onPress: goToSystemSettings },
+              ]
+            );
+          }
+        } else {
+          // Bloqueado: solo desde Ajustes
+          Alert.alert(
+            "Permiso bloqueado",
+            "Habilitalo desde los ajustes del sistema.",
+            [
+              { text: "Cancelar", style: "cancel" },
+              { text: "Abrir Ajustes", onPress: goToSystemSettings },
+            ]
+          );
+        }
+      } else {
+        // No se puede revocar programáticamente: sugerir ir a Ajustes
+        Alert.alert(
+          "Desactivar galería",
+          "Para quitar el permiso debés hacerlo desde los ajustes del sistema.",
+          [
+            { text: "Cancelar", style: "cancel" },
+            { text: "Abrir Ajustes", onPress: goToSystemSettings },
+          ]
+        );
+      }
+    },
+    [
+      galleryGranted,
+      galleryCanAskAgain,
+      requestGalleryPermission,
+      goToSystemSettings,
+    ]
   );
 
   const Option = ({ label, value }: { label: string; value: AppTheme }) => (
@@ -126,17 +185,34 @@ export default function SettingsTab() {
           <View style={{ flex: 1 }}>
             <ThemedText style={{ fontWeight: "600" }}>Cámara</ThemedText>
             <ThemedText style={{ fontSize: 12, opacity: 0.7 }}>
-              {granted ? "Permiso activo" : "Permiso no concedido"}
+              {cameraGranted ? "Permiso activo" : "Permiso no concedido"}
             </ThemedText>
           </View>
           <Switch
-            value={granted}
+            value={cameraGranted}
             onValueChange={onToggleCamera}
             trackColor={{
               false: Colors[scheme].border as string,
               true: Colors[scheme].primary as string,
             }}
-            thumbColor={granted ? "#FFFFFF" : "#FFFFFF"}
+            thumbColor={cameraGranted ? "#FFFFFF" : "#FFFFFF"}
+          />
+        </View>
+        <View style={styles.permRow}>
+          <View style={{ flex: 1 }}>
+            <ThemedText style={{ fontWeight: "600" }}>Galería</ThemedText>
+            <ThemedText style={{ fontSize: 12, opacity: 0.7 }}>
+              {galleryGranted ? "Permiso activo" : "Permiso no concedido"}
+            </ThemedText>
+          </View>
+          <Switch
+            value={galleryGranted}
+            onValueChange={onToggleGallery}
+            trackColor={{
+              false: Colors[scheme].border as string,
+              true: Colors[scheme].primary as string,
+            }}
+            thumbColor={galleryGranted ? "#FFFFFF" : "#FFFFFF"}
           />
         </View>
       </View>

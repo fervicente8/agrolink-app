@@ -1,196 +1,153 @@
 import React, { useState } from "react";
 import {
-  StyleSheet,
   View,
+  StyleSheet,
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  Alert,
+  ActivityIndicator,
+  Image,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ThemedView } from "@/components/themed-view";
 import { ThemedText } from "@/components/themed-text";
+import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { SmartTouchable as Touchable } from "@/components/ui/touchable";
-import * as Haptics from "expo-haptics";
 import { useAuth } from "@/providers/auth/AuthProvider";
-import { router } from "expo-router";
-import { IconSymbol } from "@/components/ui/icon-symbol";
+import { useRouter } from "expo-router";
+import * as Haptics from "expo-haptics";
 
 export default function LoginScreen() {
-  const insets = useSafeAreaInsets();
   const scheme = useColorScheme() ?? "light";
+  const router = useRouter();
   const { login } = useAuth();
+  const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [rememberMe, setRememberMe] = useState(false);
 
-  // Carga y uso de SecureStore de forma segura (evita fallas en web)
-  let SecureStore: any = null;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    SecureStore = require("expo-secure-store");
-  } catch {}
-  const REMEMBER_KEY = "auth:remember";
+  const logo = require("../assets/images/logo.png");
 
-  React.useEffect(() => {
-    (async () => {
-      try {
-        if (SecureStore?.getItemAsync) {
-          const raw = await SecureStore.getItemAsync(REMEMBER_KEY);
-          if (raw) {
-            const saved = JSON.parse(raw) as {
-              email?: string;
-              password?: string;
-            };
-            if (saved?.email) setEmail(saved.email);
-            if (saved?.password) setPassword(saved.password);
-            setRememberMe(true);
-          }
-        }
-      } catch {}
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const handleLogin = async () => {
+    if (!email || !password) {
+      Alert.alert("Error", "Por favor ingresa email y contraseña");
+      return;
+    }
 
-  const canSubmit = email.trim().length > 0 && password.trim().length > 0;
-
-  const onSubmit = async () => {
-    if (!canSubmit) return;
-    setError(null);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     try {
-      await login(email.trim(), password.trim(), rememberMe);
-      // Guardar o limpiar credenciales recordadas (para pre-llenar formulario)
-      try {
-        if (SecureStore?.setItemAsync && SecureStore?.deleteItemAsync) {
-          if (rememberMe) {
-            await SecureStore.setItemAsync(
-              REMEMBER_KEY,
-              JSON.stringify({ email: email.trim(), password: password.trim() })
-            );
-          } else {
-            await SecureStore.deleteItemAsync(REMEMBER_KEY);
-          }
-        }
-      } catch {}
+      setLoading(true);
+      await login(email, password);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+        () => {}
+      );
       router.replace("/(tabs)");
-    } catch (e: any) {
-      setError(e?.message || "Error al iniciar sesión");
+    } catch (error: any) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(
         () => {}
       );
+      Alert.alert("Error", error.message || "Credenciales inválidas");
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <ThemedView style={{ flex: 1 }}>
-      <LinearGradient
-        colors={[Colors[scheme].primaryDark, Colors[scheme].primary]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[styles.header, { paddingTop: insets.top + 12 }]}
-      >
-        <ThemedText type='title' lightColor='#FFF' darkColor='#FFF'>
-          Iniciar Sesión
-        </ThemedText>
-        <ThemedText
-          lightColor='#EAFEF4'
-          darkColor='#EAFEF4'
-          style={{ opacity: 0.9 }}
-        >
-          Accedé para continuar usando la app
-        </ThemedText>
-      </LinearGradient>
-
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
       >
-        <View style={{ padding: 16, gap: 12 }}>
-          <View
-            style={[
-              styles.inputCard,
-              {
-                borderColor: Colors[scheme].border,
-                backgroundColor: Colors[scheme].surface,
-              },
-            ]}
+        <LinearGradient
+          colors={[Colors[scheme].primaryDark, Colors[scheme].primary]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.header}
+        >
+          <Image
+            source={logo}
+            resizeMode='contain'
+            style={{ width: 120, height: 120 }}
+          />
+          <ThemedText type='title' lightColor='#FFF' darkColor='#FFF'>
+            AgroLink
+          </ThemedText>
+          <ThemedText
+            lightColor='#FFF'
+            darkColor='#FFF'
+            style={{ opacity: 0.9 }}
           >
+            Trazabilidad Agrícola Inteligente
+          </ThemedText>
+        </LinearGradient>
+
+        <View style={styles.form}>
+          <View style={styles.inputGroup}>
             <ThemedText style={styles.label}>Email</ThemedText>
             <TextInput
+              style={[styles.input, { color: Colors[scheme].text as string }]}
+              placeholder='tu@email.com'
+              placeholderTextColor='#999'
               value={email}
               onChangeText={setEmail}
-              placeholder='tu@correo.com'
-              placeholderTextColor={"#8FA09A"}
-              style={[styles.input, { color: Colors[scheme].text }]}
-              autoCapitalize='none'
               keyboardType='email-address'
-              returnKeyType='next'
+              autoCapitalize='none'
+              autoComplete='email'
             />
           </View>
-          <View
-            style={[
-              styles.inputCard,
-              {
-                borderColor: Colors[scheme].border,
-                backgroundColor: Colors[scheme].surface,
-              },
-            ]}
-          >
+
+          <View style={styles.inputGroup}>
             <ThemedText style={styles.label}>Contraseña</ThemedText>
             <TextInput
+              style={[styles.input, { color: Colors[scheme].text as string }]}
+              placeholder='Tu contraseña'
+              placeholderTextColor='#999'
               value={password}
               onChangeText={setPassword}
-              placeholder='Tu contraseña'
-              placeholderTextColor={"#8FA09A"}
-              style={[styles.input, { color: Colors[scheme].text }]}
-              autoCapitalize='none'
               secureTextEntry
-              returnKeyType='done'
+              autoComplete='password'
             />
           </View>
 
-          {/* Recordarme */}
           <Touchable
-            onPress={() => setRememberMe((v) => !v)}
-            style={[styles.checkboxRow]}
+            style={[
+              styles.loginBtn,
+              { backgroundColor: Colors[scheme].primary },
+            ]}
+            onPress={handleLogin}
+            disabled={loading}
           >
-            {rememberMe ? (
-              <IconSymbol
-                name='checkmark.square'
-                size={18}
-                color={Colors[scheme].text}
-              />
+            {loading ? (
+              <ActivityIndicator color='#FFF' />
             ) : (
-              <IconSymbol name='square' size={18} color={Colors[scheme].text} />
+              <ThemedText
+                lightColor='#FFF'
+                darkColor='#FFF'
+                style={{ fontWeight: "700", fontSize: 16 }}
+              >
+                Iniciar Sesión
+              </ThemedText>
             )}
-
-            <ThemedText style={{ opacity: 0.9 }}>Recordarme</ThemedText>
           </Touchable>
 
-          {error && (
-            <ThemedText style={{ color: "#D32F2F" }}>{error}</ThemedText>
-          )}
+          <View style={styles.divider}>
+            <View style={styles.line} />
+            <ThemedText style={styles.dividerText}>o</ThemedText>
+            <View style={styles.line} />
+          </View>
 
           <Touchable
-            disabled={!canSubmit}
             style={[
-              styles.primaryBtn,
-              {
-                backgroundColor: canSubmit ? Colors[scheme].primary : "#B5BDBC",
-              },
+              styles.registerBtn,
+              { borderColor: Colors[scheme].primary },
             ]}
-            onPress={onSubmit}
+            onPress={() => router.push("/register")}
+            disabled={loading}
           >
             <ThemedText
-              lightColor='#FFF'
-              darkColor='#FFF'
-              style={{ fontWeight: "700" }}
+              style={{ color: Colors[scheme].primary, fontWeight: "600" }}
             >
-              Iniciar Sesión
+              Crear Nueva Cuenta
             </ThemedText>
           </Touchable>
         </View>
@@ -201,36 +158,62 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   header: {
-    paddingHorizontal: 16,
-    paddingBottom: 18,
-    borderBottomLeftRadius: 12,
-    borderBottomRightRadius: 12,
+    padding: 32,
+    paddingTop: 80,
+    paddingBottom: 48,
+    alignItems: "center",
+    gap: 12,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
   },
-  inputCard: {
-    gap: 6,
-    padding: 12,
+  form: {
+    flex: 1,
+    padding: 24,
+    paddingTop: 32,
+    gap: 20,
+  },
+  inputGroup: {
+    gap: 8,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: "600",
+    opacity: 0.8,
+  },
+  input: {
     borderWidth: 1,
-    borderRadius: 12,
+    borderColor: "rgba(0,0,0,0.12)",
+    borderRadius: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    fontSize: 15,
   },
-  label: { fontSize: 12, opacity: 0.8 },
-  input: { fontSize: 16, paddingVertical: 8 },
-  primaryBtn: {
-    marginTop: 8,
+  loginBtn: {
+    paddingVertical: 18,
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 14,
-    borderRadius: 14,
+    marginTop: 12,
   },
-  checkboxRow: {
+  divider: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    paddingVertical: 4,
+    marginVertical: 8,
   },
-  checkboxBox: {
-    width: 18,
-    height: 18,
-    borderRadius: 4,
-    borderWidth: 1,
+  line: {
+    flex: 1,
+    height: 1,
+    backgroundColor: "rgba(0,0,0,0.12)",
+  },
+  dividerText: {
+    marginHorizontal: 16,
+    opacity: 0.5,
+    fontSize: 13,
+  },
+  registerBtn: {
+    paddingVertical: 16,
+    borderRadius: 14,
+    alignItems: "center",
+    borderWidth: 2,
   },
 });
